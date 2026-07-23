@@ -1,0 +1,980 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>注文・調達リアルタイムダッシュボード</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- PapaParse (CSV解析用) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+JP:wght@300;400;500;700&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f4f6fa',
+                            100: '#e9edf5',
+                            500: '#2563eb', // メイン：ブルー（ビジネス・管理向け）
+                            600: '#1d4ed8',
+                            700: '#1e40af',
+                            900: '#1e3a8a',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            font-family: 'Inter', 'Noto Sans JP', sans-serif;
+        }
+        /* スムーズなトランジション用 */
+        .transition-all-custom {
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        /* スクロールバーのカスタム */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
+
+    <!-- ヘッダー -->
+    <header class="bg-slate-900 text-white shadow-lg sticky top-0 z-40 border-b border-slate-800">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <!-- タイトルロゴ -->
+            <div class="flex items-center space-x-2">
+                <i data-lucide="layout-dashboard" class="w-5 h-5 text-brand-500"></i>
+                <span class="font-bold text-sm sm:text-base tracking-wider bg-gradient-to-r from-white to-slate-300 bg-clip-text text-transparent">
+                    注文・調達状況ダッシュボード
+                </span>
+            </div>
+
+            <div class="flex items-center space-x-2.5 sm:space-x-3">
+                <!-- 自動同期タイマー表示 -->
+                <div id="autoSyncContainer" class="hidden sm:flex items-center space-x-1.5 bg-slate-800 px-3 py-1.5 rounded-full text-[11px] border border-slate-700 text-slate-400">
+                    <i data-lucide="timer" class="w-3.5 h-3.5 text-slate-400"></i>
+                    <span id="autoSyncTimerText">自動更新: 05:00</span>
+                    <button onclick="toggleAutoSync()" id="autoSyncToggleBtn" class="ml-1 text-amber-400 hover:text-amber-300 font-bold focus:outline-none transition-all-custom cursor-pointer">
+                        一時停止
+                    </button>
+                </div>
+
+                <!-- ステータスインジケーター -->
+                <div id="connectionStatus" class="flex items-center space-x-2 bg-slate-800 px-3 py-1.5 rounded-full text-xs border border-slate-700">
+                    <span class="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" id="statusDot"></span>
+                    <span id="statusText" class="font-medium text-slate-300 text-[11px] sm:text-xs">同期中...</span>
+                </div>
+                
+                <!-- スプレッドシート直リンク -->
+                <a href="#" id="sheet-link" target="_blank" class="bg-slate-800 hover:bg-slate-700 text-slate-300 p-2 rounded-xl transition-all-custom flex items-center space-x-1 text-xs border border-slate-700" title="Googleスプレッドシートを開く">
+                    <i data-lucide="file-spreadsheet" class="w-4 h-4 text-emerald-500"></i>
+                    <span class="hidden md:inline">シートを開く</span>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- メインコンテンツ -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+
+        <!-- エラー通知バナー（初期状態は非表示、エラー理由を明記するよう強化） -->
+        <div id="errorBanner" class="hidden bg-red-50 border border-red-200 p-4 rounded-2xl shadow-sm text-red-700 text-xs flex items-start space-x-3 transition-all-custom">
+            <i data-lucide="alert-circle" class="w-5 h-5 flex-shrink-0 text-red-500"></i>
+            <div>
+                <p class="font-bold text-sm">⚠️ スプレッドシートへのアクセスに失敗しました</p>
+                <p class="mt-1 leading-relaxed text-slate-600 font-semibold" id="errorMessage">
+                    スプレッドシートにアクセスできません。
+                </p>
+                <div class="mt-2 text-[11px] text-slate-500 bg-white p-2.5 rounded-lg border border-slate-200">
+                    <p class="font-bold text-slate-700 mb-1">【解決方法】このサイトは単独サイトとしてスプレッドシートをCSVで読み込みます。共有設定をご確認ください。</p>
+                    <ol class="list-decimal pl-4 space-y-1 text-slate-600">
+                        <li>対象のGoogleスプレッドシートを開き、右上の「共有」ボタンをクリックします。</li>
+                        <li>「全般的なアクセス」を <strong>「リンクを知っている全員」</strong> に変更し、権限を <strong>「閲覧者」</strong> に設定します。</li>
+                        <li>設定後、このページの「データを今すぐ再同期」ボタンを押して再読み込みしてください。</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+
+        <!-- モード切替兼インフォメーション -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
+            <div>
+                <h2 class="text-sm font-semibold text-slate-700">📌 データソース設定</h2>
+                <p class="text-xs text-slate-400 mt-0.5">連携中のスプレッドシートデータを優先して分析しています。</p>
+            </div>
+            <div class="flex items-center space-x-2 bg-slate-100 p-1 rounded-xl self-start sm:self-center">
+                <button onclick="toggleMode('sheet')" id="mode-sheet" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all-custom cursor-pointer bg-white text-slate-800 shadow-sm">
+                    スプレッドシート
+                </button>
+                <button onclick="toggleMode('demo')" id="mode-demo" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all-custom cursor-pointer text-slate-500 hover:text-slate-700">
+                    デモデータ
+                </button>
+            </div>
+        </div>
+
+        <!-- メイン3指標 (KPI) -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <!-- KPI 1: 新着注文 -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 relative overflow-hidden transition-all-custom hover:shadow-md">
+                <div class="absolute left-0 top-0 bottom-0 w-1.5 bg-red-500"></div>
+                <div class="flex items-center justify-between">
+                    <div>
+                        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">① 新着注文 (未着手)</span>
+                        <h3 class="text-3xl font-bold text-red-600 mt-1 flex items-baseline" id="kpi-new-orders">
+                            0 <span class="text-xs text-slate-400 font-normal ml-1">件</span>
+                        </h3>
+                        <span class="text-[10px] text-red-500 bg-red-50 px-2 py-0.5 rounded-full mt-2 inline-block font-medium animate-pulse">
+                            手配・発注が必要です
+                        </span>
+                    </div>
+                    <div class="p-3.5 bg-red-50 rounded-xl text-red-500">
+                        <i data-lucide="bell" class="w-6 h-6"></i>
+                    </div>
+                </div>
+            </div>
+
+            <!-- KPI 2: 調達待ち -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 relative overflow-hidden transition-all-custom hover:shadow-md">
+                <div class="absolute left-0 top-0 bottom-0 w-1.5 bg-amber-500"></div>
+                <div class="flex items-center justify-between">
+                    <div>
+                        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">② 発注済 (調達待ち)</span>
+                        <h3 class="text-3xl font-bold text-amber-500 mt-1 flex items-baseline" id="kpi-procurement-orders">
+                            0 <span class="text-xs text-slate-400 font-normal ml-1">件</span>
+                        </h3>
+                        <span class="text-[10px] text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full mt-2 inline-block font-medium">
+                            入荷・完了待ちの案件
+                        </span>
+                    </div>
+                    <div class="p-3.5 bg-amber-50 rounded-xl text-amber-500">
+                        <i data-lucide="truck" class="w-6 h-6"></i>
+                    </div>
+                </div>
+            </div>
+
+            <!-- KPI 3: 完了した数 -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 relative overflow-hidden transition-all-custom hover:shadow-md">
+                <div class="absolute left-0 top-0 bottom-0 w-1.5 bg-emerald-500"></div>
+                <div class="flex items-center justify-between">
+                    <div>
+                        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">③ 処理完了済み</span>
+                        <h3 class="text-3xl font-bold text-emerald-600 mt-1 flex items-baseline" id="kpi-completed-orders">
+                            0 <span class="text-xs text-slate-400 font-normal ml-1">件</span>
+                        </h3>
+                        <span class="text-[10px] text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full mt-2 inline-block font-medium">
+                            対応完了済みの案件
+                        </span>
+                    </div>
+                    <div class="p-3.5 bg-emerald-50 rounded-xl text-emerald-600">
+                        <i data-lucide="check-circle-2" class="w-6 h-6"></i>
+                    </div>
+                </div>
+            </div>
+
+            <!-- KPI 4: 品目総数 -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 relative overflow-hidden transition-all-custom hover:shadow-md">
+                <div class="absolute left-0 top-0 bottom-0 w-1.5 bg-slate-400"></div>
+                <div class="flex items-center justify-between">
+                    <div>
+                        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">総品目数 (重複なし)</span>
+                        <h3 class="text-3xl font-bold text-slate-700 mt-1 flex items-baseline" id="kpi-unique-items">
+                            0 <span class="text-xs text-slate-400 font-normal ml-1">品目</span>
+                        </h3>
+                        <span class="text-[10px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full mt-2 inline-block font-medium" id="kpi-new-item-categories">
+                            新着注文あり: 0 品目
+                        </span>
+                    </div>
+                    <div class="p-3.5 bg-slate-100 rounded-xl text-slate-600">
+                        <i data-lucide="package" class="w-6 h-6"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 品目リスト ＆ 注文一覧明細 -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- 品目別の新着数ランキング (左カラム) -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 lg:col-span-1 flex flex-col h-[520px]">
+                <div class="border-b border-slate-100 pb-3 mb-3">
+                    <h3 class="text-sm font-bold text-slate-800 flex items-center justify-between">
+                        <span class="flex items-center space-x-1.5">
+                            <i data-lucide="alert-triangle" class="w-4.5 h-4.5 text-red-500"></i>
+                            <span>③ 品目別新着数リスト</span>
+                        </span>
+                        <span class="bg-red-50 text-red-600 text-[10px] px-2 py-0.5 rounded-md font-bold" id="new-item-badge">0品目</span>
+                    </h3>
+                    <p class="text-[11px] text-slate-400 mt-1">
+                        現在、新着注文（完了・発注ともに未チェック）がある品目です。品目を選択すると右のリストを絞り込めます。
+                    </p>
+                    
+                    <!-- 品目検索窓 -->
+                    <div class="relative mt-2">
+                        <i data-lucide="search" class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400"></i>
+                        <input type="text" id="itemSearch" oninput="filterNewItemsList()" placeholder="品目を検索..." class="w-full pl-8 pr-3 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-brand-500 focus:bg-white transition-all-custom">
+                    </div>
+                </div>
+
+                <!-- 品目リストスクロールエリア -->
+                <div class="overflow-y-auto flex-1 pr-1 space-y-1" id="new-items-list">
+                    <div class="text-center py-12 text-slate-400 text-xs">
+                        データロード中...
+                    </div>
+                </div>
+            </div>
+
+            <!-- 注文一覧テーブル (右カラム) -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 lg:col-span-2 flex flex-col h-[520px]">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 gap-2 mb-3">
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-800 flex items-center space-x-1.5">
+                            <i data-lucide="list-todo" class="w-4.5 h-4.5 text-brand-500"></i>
+                            <span>注文データ明細</span>
+                        </h3>
+                        <p class="text-[11px] text-slate-400 mt-0.5">
+                            スプレッドシート上の行データ（チェック状況別に確認可能）
+                        </p>
+                    </div>
+                    
+                    <!-- テーブル用クイックフィルター -->
+                    <div class="flex items-center gap-1.5 text-xs">
+                        <span class="text-slate-400 text-[11px] hidden sm:inline">ステータス:</span>
+                        <select id="tableStatusFilter" onchange="applyFilters()" class="bg-slate-50 border border-slate-200 text-slate-700 text-xs rounded-lg py-1 px-2 focus:ring-1 focus:ring-brand-500 focus:outline-none transition-all-custom">
+                            <option value="all">すべて表示</option>
+                            <option value="new">① 新着注文のみ</option>
+                            <option value="procuring">② 調達中のみ</option>
+                            <option value="completed">③ 完了済のみ</option>
+                        </select>
+                        <button onclick="resetItemFilter()" id="resetFilterBtn" class="hidden text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-600 px-2 py-1 rounded transition-all-custom flex items-center space-x-1">
+                            <i data-lucide="x" class="w-3 h-3"></i>
+                            <span>絞り込み解除</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- テーブル本体 -->
+                <div class="overflow-auto flex-1 border border-slate-100 rounded-xl bg-slate-50/50">
+                    <table class="w-full text-left border-collapse text-xs">
+                        <thead class="sticky top-0 bg-white shadow-sm z-10">
+                            <tr class="text-slate-500 font-bold border-b border-slate-100">
+                                <th class="py-3 px-4 w-12 text-center">No</th>
+                                <th class="py-3 px-4">品目名 (商品名)</th>
+                                <th class="py-3 px-4 w-20 text-center">発注</th>
+                                <th class="py-3 px-4 w-20 text-center">完了</th>
+                                <th class="py-3 px-4">ステータス</th>
+                                <th class="py-3 px-4 text-slate-400 font-normal">元の行データ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="orders-table-body" class="divide-y divide-slate-100 bg-white">
+                            <!-- JSで挿入されます -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- ページ下部ステータス表示 -->
+                <div class="pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
+                    <div>
+                        表示中の行: <span class="font-bold text-slate-700" id="showing-rows-count">0</span> / 総データ: <span class="font-bold text-slate-600" id="total-rows-count">0</span> 行
+                    </div>
+                    <div id="filter-status-indicator" class="text-brand-500 font-medium"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 詳細設定（スプレッドシートマッピング） -->
+        <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+            <h3 class="text-sm font-bold text-slate-800 mb-2 flex items-center space-x-2">
+                <i data-lucide="sliders" class="w-4.5 h-4.5 text-slate-500"></i>
+                <span>列マッピング＆接続オプション</span>
+            </h3>
+            <p class="text-xs text-slate-500 mb-4">
+                お使いのスプレッドシートに合わせて自動で列（完了・発注・品目）を割り振ります。もし意図しない列が対象になっている場合は、スプレッドシート上のヘッダー名と一致する列名を以下に入力してください。
+            </p>
+
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                    <label class="block text-slate-600 text-[11px] font-bold mb-1">スプレッドシートURL / ID</label>
+                    <input type="text" id="spreadsheetUrlInput" onchange="onUrlChange()" placeholder="空欄時は開いているスプレッドシートを自動認識" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-brand-500">
+                </div>
+                <div>
+                    <label class="block text-slate-600 text-[11px] font-bold mb-1">「発注」チェックの列名</label>
+                    <input type="text" id="map-order-col" placeholder="自動推測 (例: 発注, 発注フラグ)" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-brand-500" onchange="loadAndProcessData()">
+                </div>
+                <div>
+                    <label class="block text-slate-600 text-[11px] font-bold mb-1">「完了」チェックの列名</label>
+                    <input type="text" id="map-done-col" placeholder="自動推測 (例: 完了, 完了フラグ)" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-brand-500" onchange="loadAndProcessData()">
+                </div>
+                <div>
+                    <label class="block text-slate-600 text-[11px] font-bold mb-1">「品目名」の列名</label>
+                    <input type="text" id="map-item-col" placeholder="自動推測 (例: 品目, 商品名)" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-brand-500" onchange="loadAndProcessData()">
+                </div>
+            </div>
+
+            <div class="mt-4 flex items-center justify-between pt-4 border-t border-slate-100 flex-wrap gap-2">
+                <div class="text-[10px] text-slate-400">
+                    ※ 「完了」および「発注」チェックボックスの判定は、セル内の「TRUE/FALSE」もしくは「1/0」や「✔️/空欄」に対応します。
+                </div>
+                <div class="flex items-center space-x-2">
+                    <!-- 設定パネル内の自動更新ON/OFFトグル -->
+                    <div class="flex items-center space-x-2 bg-slate-50 border border-slate-100 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-slate-600">
+                        <span id="settingAutoSyncText">自動更新: ON (05:00)</span>
+                        <input type="checkbox" id="settingAutoSyncToggle" checked onchange="handleSettingAutoSyncChange()" class="w-4 h-4 text-brand-500 rounded border-slate-300 focus:ring-brand-500 cursor-pointer">
+                    </div>
+                    <button onclick="loadAndProcessData(false)" class="bg-brand-500 hover:bg-brand-600 text-white font-bold text-xs px-4 py-2 rounded-lg flex items-center space-x-1.5 transition-all-custom shadow-sm shadow-brand-500/10 cursor-pointer">
+                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                        <span>データを今すぐ再同期</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- フッター -->
+    <footer class="bg-slate-900 border-t border-slate-800 py-4 text-center text-[11px] text-slate-500">
+        <div class="max-w-7xl mx-auto px-4">
+            <p>© 2026 Smart Order & Procurement System. Realtime Sheet Analyzer</p>
+        </div>
+    </footer>
+
+    <script>
+        // --- アプリケーションの状態管理 ---
+        let currentMode = 'sheet'; // 'sheet' or 'demo'
+        let rawCsvData = [];       // CSVデータ退避用
+        let processedOrders = [];  // 解析完了注文リスト
+        let selectedItemFilter = null; // 特定の品目で絞り込む状態
+
+        // --- 自動同期設定（5分 = 300秒） ---
+        const AUTO_SYNC_INTERVAL = 300; 
+        let secondsRemaining = AUTO_SYNC_INTERVAL;
+        let autoSyncTimerId = null;
+        let isAutoSyncEnabled = true;
+
+        // デフォルトのモックフォールバック用URL
+        const DEFAULT_SPREADSHEET_ID = "1W4pc_DOxLrHWLGAAmc9dO4VwfICc62b65aSlBI95G-Q";
+        const DEFAULT_GID = "1339667343";
+
+        // 高品質デモ用受注レコード
+        const demoItemsList = [
+            "ティッシュペーパー", "トイレットペーパー (コアゴール)", "トイレットペーパー (プロローグ)", "ハミング", "キッチンペーパー"
+        ];
+        let demoOrders = [];
+        function generateDemoOrders() {
+            demoOrders = [];
+            for (let i = 1; i <= 12; i++) {
+                const randomItem = demoItemsList[Math.floor(Math.random() * demoItemsList.length)];
+                demoOrders.push({
+                    rowNum: i,
+                    itemName: randomItem,
+                    isOrdered: false,
+                    isCompleted: false,
+                    originalRow: `完了:FALSE | 発注済:FALSE | ターゲット:${randomItem}`
+                });
+            }
+        }
+
+        // 初期化ロード
+        window.onload = function() {
+            try {
+                if (typeof lucide !== 'undefined') {
+                    lucide.createIcons();
+                }
+            } catch (e) {
+                console.warn("Lucide icons load error:", e);
+            }
+            generateDemoOrders();
+
+            // localStorageから以前入力されたスプレッドシートURLをロード
+            const savedUrl = localStorage.getItem('saved_spreadsheet_url');
+            const urlInput = document.getElementById('spreadsheetUrlInput');
+            if (savedUrl) {
+                urlInput.value = savedUrl;
+            } else {
+                // 初回は空欄にしておき、自動認識をデフォルト動作にします
+                urlInput.value = "";
+            }
+
+            onUrlChange();
+            loadAndProcessData(false); // 自動同期
+            startAutoSyncTimer();      // 自動タイマー開始
+        }
+
+        // URLが変更されたら保存
+        function onUrlChange() {
+            const val = document.getElementById('spreadsheetUrlInput').value.trim();
+            const link = document.getElementById('sheet-link');
+            if (val) {
+                localStorage.setItem('saved_spreadsheet_url', val);
+                if (link && val.startsWith('http')) {
+                    link.href = val;
+                }
+            } else {
+                localStorage.removeItem('saved_spreadsheet_url');
+                if (link) link.href = "#";
+            }
+        }
+
+        // --- 自動更新タイマーのロジック ---
+        function startAutoSyncTimer() {
+            if (autoSyncTimerId) {
+                clearInterval(autoSyncTimerId);
+            }
+            secondsRemaining = AUTO_SYNC_INTERVAL;
+            updateAutoSyncUI();
+
+            autoSyncTimerId = setInterval(() => {
+                if (!isAutoSyncEnabled) return;
+                secondsRemaining--;
+                if (secondsRemaining <= 0) {
+                    loadAndProcessData(true);
+                    secondsRemaining = AUTO_SYNC_INTERVAL; 
+                }
+                updateAutoSyncUI();
+            }, 1000);
+        }
+
+        function toggleAutoSync() {
+            isAutoSyncEnabled = !isAutoSyncEnabled;
+            updateAutoSyncUI();
+        }
+
+        function handleSettingAutoSyncChange() {
+            const settingToggle = document.getElementById('settingAutoSyncToggle');
+            isAutoSyncEnabled = settingToggle.checked;
+            updateAutoSyncUI();
+        }
+
+        function updateAutoSyncUI() {
+            const timerContainer = document.getElementById('autoSyncContainer');
+            const timerText = document.getElementById('autoSyncTimerText');
+            const toggleBtn = document.getElementById('autoSyncToggleBtn');
+            const settingText = document.getElementById('settingAutoSyncText');
+            const settingToggle = document.getElementById('settingAutoSyncToggle');
+
+            if (!timerContainer) return;
+            timerContainer.classList.remove('hidden');
+
+            if (isAutoSyncEnabled) {
+                const mins = Math.floor(secondsRemaining / 60).toString().padStart(2, '0');
+                const secs = (secondsRemaining % 60).toString().padStart(2, '0');
+                timerText.innerText = `自動更新: ${mins}:${secs}`;
+                toggleBtn.innerText = "一時停止";
+                toggleBtn.className = "ml-1 text-amber-500 hover:text-amber-400 font-bold focus:outline-none transition-all-custom cursor-pointer";
+                if (settingText) settingText.innerText = `自動更新: ON (${mins}:${secs})`;
+                if (settingToggle) settingToggle.checked = true;
+            } else {
+                timerText.innerText = "自動更新: 停止中";
+                toggleBtn.innerText = "再開";
+                toggleBtn.className = "ml-1 text-emerald-500 hover:text-emerald-400 font-bold focus:outline-none transition-all-custom cursor-pointer";
+                if (settingText) settingText.innerText = "自動更新: 一時停止中";
+                if (settingToggle) settingToggle.checked = false;
+            }
+        }
+
+        // --- GASサーバー同期＆データロードロジック ---
+        function loadAndProcessData(isSilent = false) {
+            setLoadingUI(true, isSilent);
+
+            if (currentMode === 'demo') {
+                hideErrorBanner();
+                processedOrders = JSON.parse(JSON.stringify(demoOrders));
+                analyzeAndRender();
+                setLoadingUI(false, isSilent);
+                updateConnectionIndicator(true, "デモデータ動作中");
+                return;
+            }
+
+            const spreadsheetUrl = document.getElementById('spreadsheetUrlInput').value.trim();
+
+            // Google Apps Script(GAS)のサーバー側直接取得環境を検知
+            if (typeof google !== 'undefined' && google.script && google.script.run) {
+                console.log("GAS実行環境：サーバー直接同期を開始します。");
+                google.script.run
+                    .withSuccessHandler(function(response) {
+                        if (response && response.success) {
+                            hideErrorBanner();
+                            mapAndStructureGasGridData(response.data, response.fields);
+                            updateConnectionIndicator(true, "GASサーバー直接同期中");
+                            setLoadingUI(false, isSilent);
+                        } else {
+                            console.warn("GAS同期エラー:", response ? response.error : "Unknown");
+                            showErrorBanner(`スプレッドシートデータ取得失敗: ${response ? response.error : '原因不明'}`);
+                            loadViaClientSideFetch(spreadsheetUrl, isSilent);
+                        }
+                    })
+                    .withFailureHandler(function(err) {
+                        console.warn("GASサーバー通信失敗:", err);
+                        showErrorBanner(`GAS通信失敗: ${err.message || err}`);
+                        loadViaClientSideFetch(spreadsheetUrl, isSilent);
+                    })
+                    .getSpreadsheetData(spreadsheetUrl);
+            } else {
+                // 単独サイト（ブラウザ環境）：クライアントCSV同期
+                console.log("ブラウザ環境：クライアントCSV同期を開始します。");
+                loadViaClientSideFetch(spreadsheetUrl, isSilent);
+            }
+        }
+
+        // 外部CSV通信によるフォールバック
+        function loadViaClientSideFetch(spreadsheetUrl, isSilent) {
+            let sheetId = DEFAULT_SPREADSHEET_ID;
+            let gid = DEFAULT_GID;
+
+            if (spreadsheetUrl && spreadsheetUrl.includes('docs.google.com/spreadsheets')) {
+                const idMatch = spreadsheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+                if (idMatch && idMatch[1]) {
+                    sheetId = idMatch[1];
+                }
+                const gidMatch = spreadsheetUrl.match(/[#&?]gid=([0-9]+)/);
+                if (gidMatch && gidMatch[1]) {
+                    gid = gidMatch[1];
+                }
+            }
+
+            const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}`;
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+            fetch(csvUrl, { signal: controller.signal })
+                .then(response => {
+                    clearTimeout(timeoutId);
+                    if (!response.ok) throw new Error(`アクセス拒否 (HTTP ${response.status})。共有設定をご確認ください。`);
+                    return response.text();
+                })
+                .then(csvText => {
+                    hideErrorBanner();
+                    Papa.parse(csvText, {
+                        header: true,
+                        skipEmptyLines: true,
+                        complete: function(results) {
+                            if (results.data && results.data.length > 0) {
+                                rawCsvData = results.data;
+                                mapAndStructureData(results.data, results.meta.fields);
+                                updateConnectionIndicator(true, "CSV同期成功");
+                            } else {
+                                throw new Error('シート内にデータがありません。');
+                            }
+                            setLoadingUI(false, isSilent);
+                        },
+                        error: function(err) {
+                            throw new Error('解析失敗: ' + err.message);
+                        }
+                    });
+                })
+                .catch(error => {
+                    clearTimeout(timeoutId);
+                    console.warn("データ同期失敗:", error);
+
+                    showErrorBanner(`[接続エラー] データの取得が遮断されました。スプレッドシートの共有設定が「リンクを知っている全員が閲覧可」になっているかご確認ください。(詳細: ${error.message})`);
+
+                    // 自動的にデモデータで画面崩れを防ぐ
+                    currentMode = 'demo';
+                    processedOrders = JSON.parse(JSON.stringify(demoOrders));
+                    analyzeAndRender();
+                    setLoadingUI(false, isSilent);
+                    updateConnectionIndicator(false, "デモモード自動切替");
+
+                    document.getElementById('mode-sheet').className = "px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all-custom cursor-pointer text-slate-500 hover:text-slate-700";
+                    document.getElementById('mode-demo').className = "px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all-custom cursor-pointer bg-white text-slate-800 shadow-sm";
+                });
+        }
+
+        function showErrorBanner(message) {
+            const banner = document.getElementById('errorBanner');
+            const msgEl = document.getElementById('errorMessage');
+            if (banner && msgEl) {
+                msgEl.innerText = message;
+                banner.classList.remove('hidden');
+                try { if (typeof lucide !== 'undefined') lucide.createIcons(); } catch(e){}
+            }
+        }
+
+        function hideErrorBanner() {
+            const banner = document.getElementById('errorBanner');
+            if (banner) {
+                banner.classList.add('hidden');
+            }
+        }
+
+        // --- GAS用グリッドデータマッピング処理 ---
+        function mapAndStructureGasGridData(gridData, fields) {
+            if (!gridData || gridData.length < 2) {
+                showErrorBanner("スプレッドシートデータが十分に存在しません。データがあるかご確認ください。");
+                return;
+            }
+
+            const headerRow = fields;
+            const dataRows = gridData.slice(1); 
+
+            const customOrderCol = document.getElementById('map-order-col').value.trim();
+            const customDoneCol = document.getElementById('map-done-col').value.trim();
+            const customItemCol = document.getElementById('map-item-col').value.trim();
+
+            const findIndex = (customValue, regexList) => {
+                if (customValue) {
+                    const idx = headerRow.indexOf(customValue);
+                    if (idx !== -1) return idx;
+                }
+                for (let regex of regexList) {
+                    const idx = headerRow.findIndex(f => regex.test(f));
+                    if (idx !== -1) return idx;
+                }
+                return -1;
+            };
+
+            // 「完了」列を先に判定してから「発注済」を探すことで、
+            // 「※発注を選択」のようなF列を誤検出しないようにする
+            const doneIdx = findIndex(customDoneCol, [/^完了$/i, /完了/i, /done/i, /complete/i]);
+            const orderIdx = findIndex(customOrderCol, [/^発注済$/i, /発注済/i, /手配済/i, /procure/i, /ordered/i]);
+            const itemIdx = findIndex(customItemCol, [/品目/i, /商品/i, /名称/i, /製品/i, /型番/i, /item/i, /product/i, /name/i]);
+
+            document.getElementById('map-order-col').placeholder = orderIdx !== -1 ? `検出済: ${headerRow[orderIdx]}` : "自動推測 (例: 発注済)";
+            document.getElementById('map-done-col').placeholder = doneIdx !== -1 ? `検出済: ${headerRow[doneIdx]}` : "自動推測 (例: 完了)";
+            document.getElementById('map-item-col').placeholder = itemIdx !== -1 ? `検出済: ${headerRow[itemIdx]}` : "自動推測 (例: 品目名)";
+
+            processedOrders = dataRows.map((row, index) => {
+                const parseCheck = (val) => {
+                    if (val === undefined || val === null) return false;
+                    if (typeof val === 'boolean') return val;
+                    const s = val.toString().trim().toLowerCase();
+                    return s === 'true' || s === '1' || s === '✔' || s === 'yes' || s === 'on' || s === 'checked' || s === '完了' || s === '発注済';
+                };
+
+                const itemName = itemIdx !== -1 ? row[itemIdx] : (row[0] || '不明な品目');
+                const isOrdered = orderIdx !== -1 ? parseCheck(row[orderIdx]) : false;
+                const isCompleted = doneIdx !== -1 ? parseCheck(row[doneIdx]) : false;
+
+                const originalRowText = headerRow.map((f, i) => `${f}:${row[i] || ''}`).join(' | ');
+
+                return {
+                    rowNum: index + 1,
+                    itemName: itemName ? itemName.toString().trim() : '無題の品目',
+                    isOrdered: isOrdered,
+                    isCompleted: isCompleted,
+                    originalRow: originalRowText
+                };
+            });
+
+            analyzeAndRender();
+        }
+
+        // CSV用データ構造化
+        function mapAndStructureData(data, fields) {
+            const customOrderCol = document.getElementById('map-order-col').value.trim();
+            const customDoneCol = document.getElementById('map-done-col').value.trim();
+            const customItemCol = document.getElementById('map-item-col').value.trim();
+
+            const findField = (customValue, regexList) => {
+                if (customValue && fields.includes(customValue)) return customValue;
+                for (let regex of regexList) {
+                    const found = fields.find(f => regex.test(f));
+                    if (found) return found;
+                }
+                return null;
+            };
+
+            // 「完了」を先に確定 → 「発注済」を確定することで
+            // F列「※「発注」を選択」の誤検出を避ける
+            const doneCol = findField(customDoneCol, [/^完了$/i, /完了/i, /done/i, /complete/i]);
+            const orderCol = findField(customOrderCol, [/^発注済$/i, /発注済/i, /手配済/i, /procure/i, /ordered/i]);
+            const itemCol = findField(customItemCol, [/品目/i, /商品/i, /名称/i, /製品/i, /型番/i, /item/i, /product/i, /name/i]);
+
+            document.getElementById('map-order-col').placeholder = orderCol ? `自動検出: ${orderCol}` : "自動推測 (例: 発注済)";
+            document.getElementById('map-done-col').placeholder = doneCol ? `自動検出: ${doneCol}` : "自動推測 (例: 完了)";
+            document.getElementById('map-item-col').placeholder = itemCol ? `自動検出: ${itemCol}` : "自動推測 (例: 品目名)";
+
+            processedOrders = data.map((row, index) => {
+                const parseCheck = (val) => {
+                    if (!val) return false;
+                    const s = val.toString().trim().toLowerCase();
+                    return s === 'true' || s === '1' || s === '✔' || s === 'yes' || s === 'on' || s === 'checked' || s === '完了' || s === '発注済';
+                };
+
+                const itemName = itemCol ? row[itemCol] : (row[fields[0]] || '不明な品目');
+                const isOrdered = orderCol ? parseCheck(row[orderCol]) : false;
+                const isCompleted = doneCol ? parseCheck(row[doneCol]) : false;
+
+                const originalRowText = fields.map(f => `${f}:${row[f] || ''}`).join(' | ');
+
+                return {
+                    rowNum: index + 1,
+                    itemName: itemName ? itemName.trim() : '無題の品目',
+                    isOrdered: isOrdered,
+                    isCompleted: isCompleted,
+                    originalRow: originalRowText
+                };
+            });
+
+            analyzeAndRender();
+        }
+
+        // --- データ集計＆KPI描画処理 ---
+        function analyzeAndRender() {
+            let newOrdersCount = 0;        
+            let procurementCount = 0;      
+            let completedCount = 0;        
+
+            const newItemCountsMap = {};
+            const uniqueItemsSet = new Set();
+
+            processedOrders.forEach(order => {
+                uniqueItemsSet.add(order.itemName);
+
+                if (!order.isCompleted && !order.isOrdered) {
+                    newOrdersCount++;
+                    newItemCountsMap[order.itemName] = (newItemCountsMap[order.itemName] || 0) + 1;
+                } else if (order.isOrdered && !order.isCompleted) {
+                    procurementCount++;
+                } else if (order.isCompleted) {
+                    completedCount++;
+                }
+            });
+
+            document.getElementById('kpi-new-orders').innerHTML = `${newOrdersCount} <span class="text-xs text-slate-400 font-normal ml-1">件</span>`;
+            document.getElementById('kpi-procurement-orders').innerHTML = `${procurementCount} <span class="text-xs text-slate-400 font-normal ml-1">件</span>`;
+            document.getElementById('kpi-completed-orders').innerHTML = `${completedCount} <span class="text-xs text-slate-400 font-normal ml-1">件</span>`;
+            document.getElementById('kpi-unique-items').innerHTML = `${uniqueItemsSet.size} <span class="text-xs text-slate-400 font-normal ml-1">品目</span>`;
+
+            const activeNewItemCategories = Object.keys(newItemCountsMap).length;
+            document.getElementById('kpi-new-item-categories').innerText = `新着注文あり: ${activeNewItemCategories} 品目`;
+
+            const sortedNewItems = Object.keys(newItemCountsMap).map(itemName => {
+                return {
+                    name: itemName,
+                    count: newItemCountsMap[itemName]
+                };
+            }).sort((a, b) => b.count - a.count);
+
+            renderNewItemsList(sortedNewItems);
+            applyFilters();
+        }
+
+        // 新着リスト生成
+        function renderNewItemsList(items) {
+            const listContainer = document.getElementById('new-items-list');
+            const badge = document.getElementById('new-item-badge');
+            
+            badge.innerText = `${items.length}品目`;
+
+            if (items.length === 0) {
+                listContainer.innerHTML = `
+                    <div class="flex flex-col items-center justify-center h-full text-slate-400 py-10">
+                        <i data-lucide="check-circle" class="w-10 h-10 text-emerald-500 mb-2"></i>
+                        <span class="text-xs font-semibold text-slate-600">新着注文は現在ゼロです！</span>
+                        <span class="text-[10px] text-slate-400 mt-1">手配が完了、または調達中です。</span>
+                    </div>
+                `;
+                try { if (typeof lucide !== 'undefined') lucide.createIcons(); } catch(e){}
+                return;
+            }
+
+            listContainer.innerHTML = items.map((item, index) => {
+                const isSelected = selectedItemFilter === item.name;
+                const activeClasses = isSelected 
+                    ? 'bg-brand-500 text-white border-brand-600 shadow-sm' 
+                    : 'bg-white hover:bg-slate-50 border-slate-100 text-slate-700';
+
+                return `
+                    <div onclick="toggleItemFilter('${escapeHtml(item.name)}')" class="flex items-center justify-between p-2.5 rounded-xl border text-xs cursor-pointer transition-all-custom ${activeClasses}">
+                        <div class="flex items-center space-x-2 truncate pr-1">
+                            <span class="font-bold flex-shrink-0 w-5 h-5 bg-slate-100 text-slate-500 rounded-lg flex items-center justify-center text-[10px] ${isSelected ? 'bg-brand-600 text-brand-100' : ''}">
+                                ${index + 1}
+                            </span>
+                            <span class="font-semibold truncate" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span>
+                        </div>
+                        <div class="flex items-center space-x-1 flex-shrink-0">
+                            <span class="px-2 py-0.5 rounded-full font-bold ${isSelected ? 'bg-white/20 text-white' : 'bg-red-50 text-red-600'} text-[10px]">
+                                ${item.count}件
+                            </span>
+                            <i data-lucide="chevron-right" class="w-3 h-3 ${isSelected ? 'text-brand-200' : 'text-slate-300'}"></i>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            try { if (typeof lucide !== 'undefined') lucide.createIcons(); } catch(e){}
+        }
+
+        // 検索フィルター
+        function filterNewItemsList() {
+            const searchText = document.getElementById('itemSearch').value.toLowerCase().trim();
+            const listItems = document.getElementById('new-items-list').children;
+
+            Array.from(listItems).forEach(element => {
+                const itemName = element.innerText.toLowerCase();
+                if (itemName.includes(searchText) || searchText === '') {
+                    element.classList.remove('hidden');
+                } else {
+                    element.classList.add('hidden');
+                }
+            });
+        }
+
+        function toggleItemFilter(itemName) {
+            if (selectedItemFilter === itemName) {
+                selectedItemFilter = null;
+            } else {
+                selectedItemFilter = itemName;
+            }
+            analyzeAndRender();
+        }
+
+        function resetItemFilter() {
+            selectedItemFilter = null;
+            analyzeAndRender();
+        }
+
+        // 明細テーブル反映
+        function applyFilters() {
+            const tableStatus = document.getElementById('tableStatusFilter').value;
+            const tbody = document.getElementById('orders-table-body');
+            const resetBtn = document.getElementById('resetFilterBtn');
+            const indicator = document.getElementById('filter-status-indicator');
+
+            const filtered = processedOrders.filter(order => {
+                if (selectedItemFilter && order.itemName !== selectedItemFilter) {
+                    return false;
+                }
+                if (tableStatus === 'new' && (order.isCompleted || order.isOrdered)) return false;
+                if (tableStatus === 'procuring' && (!order.isOrdered || order.isCompleted)) return false;
+                if (tableStatus === 'completed' && !order.isCompleted) return false;
+                return true;
+            });
+
+            if (selectedItemFilter) {
+                resetBtn.classList.remove('hidden');
+                indicator.innerText = `「${selectedItemFilter}」で絞り込み中`;
+            } else {
+                resetBtn.classList.add('hidden');
+                indicator.innerText = "";
+            }
+
+            document.getElementById('showing-rows-count').innerText = filtered.length;
+            document.getElementById('total-rows-count').innerText = processedOrders.length;
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="6" class="py-12 text-center text-slate-400 text-xs">
+                            <i data-lucide="info" class="w-8 h-8 mx-auto mb-2 text-slate-300"></i>
+                            表示条件に合う注文データがありません。
+                        </td>
+                    </tr>
+                `;
+                try { if (typeof lucide !== 'undefined') lucide.createIcons(); } catch(e){}
+                return;
+            }
+
+            tbody.innerHTML = filtered.map(order => {
+                let statusBadge = '';
+                if (!order.isCompleted && !order.isOrdered) {
+                    statusBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-50 text-red-600 border border-red-100">① 新着</span>`;
+                } else if (order.isOrdered && !order.isCompleted) {
+                    statusBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-600 border border-amber-100">② 調達中</span>`;
+                } else {
+                    statusBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-600 border border-emerald-100">③ 完了</span>`;
+                }
+
+                const orderCheck = order.isOrdered 
+                    ? `<span class="text-amber-500 font-bold bg-amber-50 px-2 py-1 rounded border border-amber-200">✔️ ON</span>` 
+                    : `<span class="text-slate-300 bg-slate-50 px-2 py-1 rounded">--</span>`;
+                
+                const doneCheck = order.isCompleted 
+                    ? `<span class="text-emerald-600 font-bold bg-emerald-50 px-2 py-1 rounded border border-emerald-200">✔️ ON</span>` 
+                    : `<span class="text-slate-300 bg-slate-50 px-2 py-1 rounded">--</span>`;
+
+                return `
+                    <tr class="hover:bg-slate-50/50 transition duration-150">
+                        <td class="py-3 px-4 text-center font-mono text-slate-400 font-medium">${order.rowNum}</td>
+                        <td class="py-3 px-4 font-semibold text-slate-800">${escapeHtml(order.itemName)}</td>
+                        <td class="py-3 px-4 text-center">${orderCheck}</td>
+                        <td class="py-3 px-4 text-center">${doneCheck}</td>
+                        <td class="py-3 px-4">${statusBadge}</td>
+                        <td class="py-3 px-4 text-slate-400 font-mono text-[10px] max-w-[200px] truncate" title="${escapeHtml(order.originalRow)}">
+                            ${escapeHtml(order.originalRow)}
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            try { if (typeof lucide !== 'undefined') lucide.createIcons(); } catch(e){}
+        }
+
+        // --- UIステータス反映、他ヘルパーユーティリティ ---
+        function toggleMode(mode) {
+            currentMode = mode;
+            const btnDemo = document.getElementById('mode-demo');
+            const btnSheet = document.getElementById('mode-sheet');
+
+            if (mode === 'sheet') {
+                btnSheet.className = "px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all-custom cursor-pointer bg-white text-slate-800 shadow-sm";
+                btnDemo.className = "px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all-custom cursor-pointer text-slate-500 hover:text-slate-700";
+            } else {
+                btnDemo.className = "px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all-custom cursor-pointer bg-white text-slate-800 shadow-sm";
+                btnSheet.className = "px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all-custom cursor-pointer text-slate-500 hover:text-slate-700";
+            }
+
+            selectedItemFilter = null;
+            loadAndProcessData();
+        }
+
+        function updateConnectionIndicator(isSuccess, message) {
+            const dot = document.getElementById('statusDot');
+            const txt = document.getElementById('statusText');
+            if (!dot || !txt) return;
+
+            if (isSuccess) {
+                dot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse";
+                txt.innerText = message;
+            } else {
+                dot.className = "w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse";
+                txt.innerText = message;
+            }
+        }
+
+        function setLoadingUI(isLoading, isSilent = false) {
+            const txt = document.getElementById('statusText');
+            if (!txt) return;
+
+            if (isLoading) {
+                if (isSilent) {
+                    txt.innerText = "自動同期中...";
+                } else {
+                    txt.innerText = "データを取得中...";
+                }
+            }
+        }
+
+        function escapeHtml(str) {
+            if (typeof str !== 'string') return str;
+            return str
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+    </script>
+</body>
+</html>

@@ -86,7 +86,7 @@
                 </div>
                 
                 <!-- スプレッドシート直リンク -->
-                <a href="#" id="sheet-link" target="_blank" class="bg-slate-800 hover:bg-slate-700 text-slate-300 p-2 rounded-xl transition-all-custom flex items-center space-x-1 text-xs border border-slate-700" title="Googleスプレッドシートを開く">
+                <a href="https://docs.google.com/spreadsheets/d/1W4pc_DOxLrHWLGAAmc9dO4VwfICc62b65aSlBI95G-Q/edit?usp=sharing" id="sheet-link" target="_blank" class="bg-slate-800 hover:bg-slate-700 text-slate-300 p-2 rounded-xl transition-all-custom flex items-center space-x-1 text-xs border border-slate-700" title="Googleスプレッドシートを開く">
                     <i data-lucide="file-spreadsheet" class="w-4 h-4 text-emerald-500"></i>
                     <span class="hidden md:inline">シートを開く</span>
                 </a>
@@ -133,7 +133,7 @@
         </div>
 
         <!-- メイン3指標 (KPI) -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <!-- KPI 1: 新着注文 -->
             <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 relative overflow-hidden transition-all-custom hover:shadow-md">
                 <div class="absolute left-0 top-0 bottom-0 w-1.5 bg-red-500"></div>
@@ -191,31 +191,13 @@
                 </div>
             </div>
 
-            <!-- KPI 4: 品目総数 -->
-            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 relative overflow-hidden transition-all-custom hover:shadow-md">
-                <div class="absolute left-0 top-0 bottom-0 w-1.5 bg-slate-400"></div>
-                <div class="flex items-center justify-between">
-                    <div>
-                        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">総品目数 (重複なし)</span>
-                        <h3 class="text-3xl font-bold text-slate-700 mt-1 flex items-baseline" id="kpi-unique-items">
-                            0 <span class="text-xs text-slate-400 font-normal ml-1">品目</span>
-                        </h3>
-                        <span class="text-[10px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full mt-2 inline-block font-medium" id="kpi-new-item-categories">
-                            新着注文あり: 0 品目
-                        </span>
-                    </div>
-                    <div class="p-3.5 bg-slate-100 rounded-xl text-slate-600">
-                        <i data-lucide="package" class="w-6 h-6"></i>
-                    </div>
-                </div>
-            </div>
         </div>
 
         <!-- 品目リスト ＆ 注文一覧明細 -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
             
             <!-- 品目別の新着数ランキング (左カラム) -->
-            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 lg:col-span-1 flex flex-col h-[520px]">
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 lg:col-span-1 flex flex-col h-[900px]">
                 <div class="border-b border-slate-100 pb-3 mb-3">
                     <h3 class="text-sm font-bold text-slate-800 flex items-center justify-between">
                         <span class="flex items-center space-x-1.5">
@@ -244,7 +226,7 @@
             </div>
 
             <!-- 注文一覧テーブル (右カラム) -->
-            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 lg:col-span-2 flex flex-col h-[520px]">
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 lg:col-span-2 flex flex-col h-[900px]">
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 gap-2 mb-3">
                     <div>
                         <h3 class="text-sm font-bold text-slate-800 flex items-center space-x-1.5">
@@ -373,6 +355,7 @@
         // デフォルトのモックフォールバック用URL
         const DEFAULT_SPREADSHEET_ID = "1W4pc_DOxLrHWLGAAmc9dO4VwfICc62b65aSlBI95G-Q";
         const DEFAULT_GID = "1339667343";
+        const DEFAULT_SHEET_LINK = "https://docs.google.com/spreadsheets/d/1W4pc_DOxLrHWLGAAmc9dO4VwfICc62b65aSlBI95G-Q/edit?usp=sharing";
 
         // 高品質デモ用受注レコード
         const demoItemsList = [
@@ -430,7 +413,7 @@
                 }
             } else {
                 localStorage.removeItem('saved_spreadsheet_url');
-                if (link) link.href = "#";
+                if (link) link.href = DEFAULT_SHEET_LINK;
             }
         }
 
@@ -754,10 +737,6 @@
             document.getElementById('kpi-new-orders').innerHTML = `${newOrdersCount} <span class="text-xs text-slate-400 font-normal ml-1">件</span>`;
             document.getElementById('kpi-procurement-orders').innerHTML = `${procurementCount} <span class="text-xs text-slate-400 font-normal ml-1">件</span>`;
             document.getElementById('kpi-completed-orders').innerHTML = `${completedCount} <span class="text-xs text-slate-400 font-normal ml-1">件</span>`;
-            document.getElementById('kpi-unique-items').innerHTML = `${uniqueItemsSet.size} <span class="text-xs text-slate-400 font-normal ml-1">品目</span>`;
-
-            const activeNewItemCategories = Object.keys(newItemCountsMap).length;
-            document.getElementById('kpi-new-item-categories').innerText = `新着注文あり: ${activeNewItemCategories} 品目`;
 
             const sortedNewItems = Object.keys(newItemCountsMap).map(itemName => {
                 return {
@@ -796,7 +775,7 @@
                     : 'bg-white hover:bg-slate-50 border-slate-100 text-slate-700';
 
                 return `
-                    <div onclick="toggleItemFilter('${escapeHtml(item.name)}')" class="flex items-center justify-between p-2.5 rounded-xl border text-xs cursor-pointer transition-all-custom ${activeClasses}">
+                    <div onclick="toggleItemFilter('${escapeHtml(item.name)}')" class="flex items-center justify-between p-1.5 rounded-xl border text-xs cursor-pointer transition-all-custom ${activeClasses}">
                         <div class="flex items-center space-x-2 truncate pr-1">
                             <span class="font-bold flex-shrink-0 w-5 h-5 bg-slate-100 text-slate-500 rounded-lg flex items-center justify-center text-[10px] ${isSelected ? 'bg-brand-600 text-brand-100' : ''}">
                                 ${index + 1}
@@ -906,12 +885,12 @@
 
                 return `
                     <tr class="hover:bg-slate-50/50 transition duration-150">
-                        <td class="py-3 px-4 text-center font-mono text-slate-400 font-medium">${order.rowNum}</td>
-                        <td class="py-3 px-4 font-semibold text-slate-800">${escapeHtml(order.itemName)}</td>
-                        <td class="py-3 px-4 text-center">${orderCheck}</td>
-                        <td class="py-3 px-4 text-center">${doneCheck}</td>
-                        <td class="py-3 px-4">${statusBadge}</td>
-                        <td class="py-3 px-4 text-slate-400 font-mono text-[10px] max-w-[200px] truncate" title="${escapeHtml(order.originalRow)}">
+                        <td class="py-1.5 px-4 text-center font-mono text-slate-400 font-medium">${order.rowNum}</td>
+                        <td class="py-1.5 px-4 font-semibold text-slate-800">${escapeHtml(order.itemName)}</td>
+                        <td class="py-1.5 px-4 text-center">${orderCheck}</td>
+                        <td class="py-1.5 px-4 text-center">${doneCheck}</td>
+                        <td class="py-1.5 px-4">${statusBadge}</td>
+                        <td class="py-1.5 px-4 text-slate-400 font-mono text-[10px] max-w-[200px] truncate" title="${escapeHtml(order.originalRow)}">
                             ${escapeHtml(order.originalRow)}
                         </td>
                     </tr>
